@@ -22,7 +22,7 @@ class City
 
     /**
      * @ORM\ManyToOne(targetEntity=Country::class)
-     * @ORM\JoinColumn(name="country", referencedColumnName="id")
+     * @ORM\JoinColumn(name="country_id", referencedColumnName="id")
      * @ORM\Cache
      */
     public $country;

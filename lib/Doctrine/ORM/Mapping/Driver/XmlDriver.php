@@ -147,7 +147,7 @@ class XmlDriver extends FileDriver
                     ->withComponentMetadata($metadata)
                     ->withDiscriminatorColumnAnnotation(
                         isset($xmlRoot->{'discriminator-column'})
-                            ? $this->convertDiscriminiatorColumnElementToDiscriminatorColumnAnnotation($xmlRoot->{'discriminator-column'})
+                            ? $this->convertDiscrimininatorColumnElementToDiscriminatorColumnAnnotation($xmlRoot->{'discriminator-column'})
                             : null
                     );
 
@@ -278,233 +278,119 @@ class XmlDriver extends FileDriver
                 );
             }
 
+            $metadata->fieldNames[$fieldMetadata->getColumnName()] = $fieldMetadata->getName();
+
             $metadata->addProperty($fieldMetadata);
         }
 
         // Evaluate <one-to-one ...> mappings
         if (isset($xmlRoot->{'one-to-one'})) {
+            $oneToOneAssociationBuilder = new Builder\OneToOneAssociationMetadataBuilder($metadataBuildingContext);
+
+            $oneToOneAssociationBuilder
+                ->withComponentMetadata($metadata);
+
             foreach ($xmlRoot->{'one-to-one'} as $oneToOneElement) {
-                $association  = new Mapping\OneToOneAssociationMetadata((string) $oneToOneElement['field']);
-                $targetEntity = (string) $oneToOneElement['target-entity'];
+                $fieldName           = (string) $oneToOneElement['field'];
+                $associationMetadata = $oneToOneAssociationBuilder
+                    ->withFieldName($fieldName)
+                    ->withCacheAnnotation($this->convertCacheElementToCacheAnnotation($oneToOneElement->cache))
+                    ->withOneToOneAnnotation($this->convertOneToOneElementToOneToOneAnnotation($oneToOneElement))
+                    ->withIdAnnotation(isset($associationIds[$fieldName]) ? new Annotation\Id() : null)
+                    ->withJoinColumnAnnotation(
+                        isset($oneToOneElement->{'join-column'})
+                            ? $this->convertJoinColumnElementToJoinColumnAnnotation($oneToOneElement->{'join-column'})
+                            : null
+                    )
+                    ->withJoinColumnsAnnotation(
+                        isset($oneToOneElement->{'join-columns'})
+                            ? $this->convertJoinColumnsElementToJoinColumnsAnnotation($oneToOneElement->{'join-columns'})
+                            : null
+                    )
+                    ->build();
 
-                $association->setTargetEntity($targetEntity);
+                // Prevent column duplication
+                foreach ($associationMetadata->getJoinColumns() as $joinColumnMetadata) {
+                    $columnName = $joinColumnMetadata->getColumnName();
 
-                if (isset($associationIds[$association->getName()])) {
-                    $association->setPrimaryKey(true);
-                }
-
-                if (isset($oneToOneElement->cascade)) {
-                    $association->setCascade($this->getCascadeMappings($oneToOneElement->cascade));
-                }
-
-                if (isset($oneToOneElement['orphan-removal'])) {
-                    $association->setOrphanRemoval($this->evaluateBoolean($oneToOneElement['orphan-removal']));
-                }
-
-                if (isset($oneToOneElement['fetch'])) {
-                    $association->setFetchMode(
-                        constant(sprintf('%s::%s', Mapping\FetchMode::class, (string) $oneToOneElement['fetch']))
-                    );
-                }
-
-                if (isset($oneToOneElement['mapped-by'])) {
-                    $association->setMappedBy((string) $oneToOneElement['mapped-by']);
-                    $association->setOwningSide(false);
-                }
-
-                if (isset($oneToOneElement['inversed-by'])) {
-                    $association->setInversedBy((string) $oneToOneElement['inversed-by']);
-                    $association->setOwningSide(true);
-                }
-
-                // Evaluate second level cache
-                if (isset($oneToOneElement->cache)) {
-                    $cacheBuilder = new Builder\CacheMetadataBuilder($metadataBuildingContext);
-
-                    $cacheBuilder
-                        ->withComponentMetadata($metadata)
-                        ->withFieldName($association->getName())
-                        ->withCacheAnnotation($this->convertCacheElementToCacheAnnotation($oneToOneElement->cache));
-
-                    $association->setCache($cacheBuilder->build());
-                }
-
-                // Check for owning side to consider join column
-                if (! $association->isOwningSide()) {
-                    $metadata->addProperty($association);
-
-                    continue;
-                }
-
-                // Check for JoinColumn/JoinColumns annotations
-                $joinColumnBuilder = new Builder\JoinColumnMetadataBuilder($metadataBuildingContext);
-
-                $joinColumnBuilder
-                    ->withComponentMetadata($metadata)
-                    ->withFieldName($association->getName());
-
-                switch (true) {
-                    case isset($oneToOneElement->{'join-column'}):
-                        $joinColumnAnnotation = $this->convertJoinColumnElementToJoinColumnAnnotation($oneToOneElement->{'join-column'});
-
-                        $joinColumnBuilder->withJoinColumnAnnotation($joinColumnAnnotation);
-
-                        $association->addJoinColumn($joinColumnBuilder->build());
-                        break;
-
-                    case isset($oneToOneElement->{'join-columns'}):
-                        foreach ($oneToOneElement->{'join-columns'}->{'join-column'} as $joinColumnElement) {
-                            $joinColumnAnnotation = $this->convertJoinColumnElementToJoinColumnAnnotation($joinColumnElement);
-
-                            $joinColumnBuilder->withJoinColumnAnnotation($joinColumnAnnotation);
-
-                            $association->addJoinColumn($joinColumnBuilder->build());
-                        }
-
-                        break;
-
-                    default:
-                        $association->addJoinColumn($joinColumnBuilder->build());
-                        break;
-                }
-
-                $metadata->addProperty($association);
-            }
-        }
-
-        // Evaluate <one-to-many ...> mappings
-        if (isset($xmlRoot->{'one-to-many'})) {
-            foreach ($xmlRoot->{'one-to-many'} as $oneToManyElement) {
-                $association  = new Mapping\OneToManyAssociationMetadata((string) $oneToManyElement['field']);
-                $targetEntity = (string) $oneToManyElement['target-entity'];
-
-                $association->setTargetEntity($targetEntity);
-                $association->setOwningSide(false);
-                $association->setMappedBy((string) $oneToManyElement['mapped-by']);
-
-                if (isset($associationIds[$association->getName()])) {
-                    throw Mapping\MappingException::illegalToManyIdentifierAssociation($className, $association->getName());
-                }
-
-                if (isset($oneToManyElement['fetch'])) {
-                    $association->setFetchMode(
-                        constant(sprintf('%s::%s', Mapping\FetchMode::class, (string) $oneToManyElement['fetch']))
-                    );
-                }
-
-                if (isset($oneToManyElement->cascade)) {
-                    $association->setCascade($this->getCascadeMappings($oneToManyElement->cascade));
-                }
-
-                if (isset($oneToManyElement['orphan-removal'])) {
-                    $association->setOrphanRemoval($this->evaluateBoolean($oneToManyElement['orphan-removal']));
-                }
-
-                if (isset($oneToManyElement->{'order-by'})) {
-                    $orderBy = [];
-
-                    foreach ($oneToManyElement->{'order-by'}->{'order-by-field'} as $orderByField) {
-                        $orderBy[(string) $orderByField['name']] = isset($orderByField['direction'])
-                            ? (string) $orderByField['direction']
-                            : Criteria::ASC;
+                    if ($metadata->checkPropertyDuplication($columnName)) {
+                        throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
                     }
 
-                    $association->setOrderBy($orderBy);
+                    if ($associationMetadata->isOwningSide()) {
+                        $metadata->fieldNames[$columnName] = $associationMetadata->getName();
+                    }
                 }
 
-                if (isset($oneToManyElement['index-by'])) {
-                    $association->setIndexedBy((string) $oneToManyElement['index-by']);
-                } elseif (isset($oneToManyElement->{'index-by'})) {
-                    throw new InvalidArgumentException('<index-by /> is not a valid tag');
-                }
-
-                // Evaluate second level cache
-                if (isset($oneToManyElement->cache)) {
-                    $cacheBuilder = new Builder\CacheMetadataBuilder($metadataBuildingContext);
-
-                    $cacheBuilder
-                        ->withComponentMetadata($metadata)
-                        ->withFieldName($association->getName())
-                        ->withCacheAnnotation($this->convertCacheElementToCacheAnnotation($oneToManyElement->cache));
-
-                    $association->setCache($cacheBuilder->build());
-                }
-
-                $metadata->addProperty($association);
+                $metadata->addProperty($associationMetadata);
             }
         }
 
         // Evaluate <many-to-one ...> mappings
         if (isset($xmlRoot->{'many-to-one'})) {
+            $manyToOneAssociationBuilder = new Builder\ManyToOneAssociationMetadataBuilder($metadataBuildingContext);
+
+            $manyToOneAssociationBuilder
+                ->withComponentMetadata($metadata);
+
             foreach ($xmlRoot->{'many-to-one'} as $manyToOneElement) {
-                $association  = new Mapping\ManyToOneAssociationMetadata((string) $manyToOneElement['field']);
-                $targetEntity = (string) $manyToOneElement['target-entity'];
+                $fieldName           = (string) $manyToOneElement['field'];
+                $associationMetadata = $manyToOneAssociationBuilder
+                    ->withFieldName($fieldName)
+                    ->withCacheAnnotation($this->convertCacheElementToCacheAnnotation($manyToOneElement->cache))
+                    ->withManyToOneAnnotation($this->convertManyToOneElementToManyToOneAnnotation($manyToOneElement))
+                    ->withIdAnnotation(isset($associationIds[$fieldName]) ? new Annotation\Id() : null)
+                    ->withJoinColumnAnnotation(
+                        isset($manyToOneElement->{'join-column'})
+                            ? $this->convertJoinColumnElementToJoinColumnAnnotation($manyToOneElement->{'join-column'})
+                            : null
+                    )
+                    ->withJoinColumnsAnnotation(
+                        isset($manyToOneElement->{'join-columns'})
+                            ? $this->convertJoinColumnsElementToJoinColumnsAnnotation($manyToOneElement->{'join-columns'})
+                            : null
+                    )
+                    ->build();
 
-                $association->setTargetEntity($targetEntity);
+                // Prevent column duplication
+                foreach ($associationMetadata->getJoinColumns() as $joinColumnMetadata) {
+                    $columnName = $joinColumnMetadata->getColumnName();
 
-                if (isset($associationIds[$association->getName()])) {
-                    $association->setPrimaryKey(true);
+                    if ($metadata->checkPropertyDuplication($columnName)) {
+                        throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
+                    }
+
+                    if ($associationMetadata->isOwningSide()) {
+                        $metadata->fieldNames[$columnName] = $associationMetadata->getName();
+                    }
                 }
 
-                if (isset($manyToOneElement['fetch'])) {
-                    $association->setFetchMode(
-                        constant('Doctrine\ORM\Mapping\FetchMode::' . (string) $manyToOneElement['fetch'])
-                    );
-                }
+                $metadata->addProperty($associationMetadata);
+            }
+        }
 
-                if (isset($manyToOneElement->cascade)) {
-                    $association->setCascade($this->getCascadeMappings($manyToOneElement->cascade));
-                }
+        // Evaluate <one-to-many ...> mappings
+        if (isset($xmlRoot->{'one-to-many'})) {
+            $oneToManyAssociationBuilder = new Builder\OneToManyAssociationMetadataBuilder($metadataBuildingContext);
 
-                if (isset($manyToOneElement['inversed-by'])) {
-                    $association->setInversedBy((string) $manyToOneElement['inversed-by']);
-                }
+            $oneToManyAssociationBuilder
+                ->withComponentMetadata($metadata);
 
-                // Evaluate second level cache
-                if (isset($manyToOneElement->cache)) {
-                    $cacheBuilder = new Builder\CacheMetadataBuilder($metadataBuildingContext);
+            foreach ($xmlRoot->{'one-to-many'} as $oneToManyElement) {
+                $fieldName           = (string) $oneToManyElement['field'];
+                $associationMetadata = $oneToManyAssociationBuilder
+                    ->withFieldName($fieldName)
+                    ->withCacheAnnotation($this->convertCacheElementToCacheAnnotation($oneToManyElement->cache))
+                    ->withOneToManyAnnotation($this->convertOneToManyElementToOneToManyAnnotation($oneToManyElement))
+                    ->withOrderByAnnotation(
+                        isset($oneToManyElement->{'order-by'})
+                            ? $this->convertOrderByElementToOrderByAnnotation($oneToManyElement->{'order-by'})
+                            : null
+                    )
+                    ->withIdAnnotation(isset($associationIds[$fieldName]) ? new Annotation\Id() : null)
+                    ->build();
 
-                    $cacheBuilder
-                        ->withComponentMetadata($metadata)
-                        ->withFieldName($association->getName())
-                        ->withCacheAnnotation($this->convertCacheElementToCacheAnnotation($manyToOneElement->cache));
-
-                    $association->setCache($cacheBuilder->build());
-                }
-
-                // Check for JoinColumn/JoinColumns annotations
-                $joinColumnBuilder = new Builder\JoinColumnMetadataBuilder($metadataBuildingContext);
-
-                $joinColumnBuilder
-                    ->withComponentMetadata($metadata)
-                    ->withFieldName($association->getName());
-
-                switch (true) {
-                    case isset($oneToOneElement->{'join-column'}):
-                        $joinColumnAnnotation = $this->convertJoinColumnElementToJoinColumnAnnotation($oneToOneElement->{'join-column'});
-
-                        $joinColumnBuilder->withJoinColumnAnnotation($joinColumnAnnotation);
-
-                        $association->addJoinColumn($joinColumnBuilder->build());
-                        break;
-
-                    case isset($oneToOneElement->{'join-columns'}):
-                        foreach ($oneToOneElement->{'join-columns'}->{'join-column'} as $joinColumnElement) {
-                            $joinColumnAnnotation = $this->convertJoinColumnElementToJoinColumnAnnotation($joinColumnElement);
-
-                            $joinColumnBuilder->withJoinColumnAnnotation($joinColumnAnnotation);
-
-                            $association->addJoinColumn($joinColumnBuilder->build());
-                        }
-
-                        break;
-
-                    default:
-                        $association->addJoinColumn($joinColumnBuilder->build());
-                        break;
-                }
-
-                $metadata->addProperty($association);
+                $metadata->addProperty($associationMetadata);
             }
         }
 
@@ -830,6 +716,90 @@ class XmlDriver extends FileDriver
         return $array;
     }
 
+    private function convertOneToOneElementToOneToOneAnnotation(
+        SimpleXMLElement $oneToOneElement
+    ) : Annotation\OneToOne {
+        $oneToOneAnnotation = new Annotation\OneToOne();
+
+        $oneToOneAnnotation->targetEntity = (string) $oneToOneElement['target-entity'];
+
+        if (isset($oneToOneElement['mapped-by'])) {
+            $oneToOneAnnotation->mappedBy = (string) $oneToOneElement['mapped-by'];
+        }
+
+        if (isset($oneToOneElement['inversed-by'])) {
+            $oneToOneAnnotation->inversedBy = (string) $oneToOneElement['inversed-by'];
+        }
+
+        if (isset($oneToOneElement['orphan-removal'])) {
+            $oneToOneAnnotation->orphanRemoval = $this->evaluateBoolean($oneToOneElement['orphan-removal']);
+        }
+
+        if (isset($oneToOneElement['fetch'])) {
+            $oneToOneAnnotation->fetch = (string) $oneToOneElement['fetch'];
+        }
+
+        if (isset($oneToOneElement->cascade)) {
+            $oneToOneAnnotation->cascade = $this->getCascadeMappings($oneToOneElement->cascade);
+        }
+
+        return $oneToOneAnnotation;
+    }
+
+    private function convertManyToOneElementToManyToOneAnnotation(
+        SimpleXMLElement $manyToOneElement
+    ) : Annotation\ManyToOne {
+        $manyToOneAnnotation = new Annotation\ManyToOne();
+
+        $manyToOneAnnotation->targetEntity = (string) $manyToOneElement['target-entity'];
+
+        if (isset($manyToOneElement['inversed-by'])) {
+            $manyToOneAnnotation->inversedBy = (string) $manyToOneElement['inversed-by'];
+        }
+
+        if (isset($manyToOneElement['fetch'])) {
+            $manyToOneAnnotation->fetch = (string) $manyToOneElement['fetch'];
+        }
+
+        if (isset($manyToOneElement->cascade)) {
+            $manyToOneAnnotation->cascade = $this->getCascadeMappings($manyToOneElement->cascade);
+        }
+
+        return $manyToOneAnnotation;
+    }
+
+    private function convertOneToManyElementToOneToManyAnnotation(
+        SimpleXMLElement $oneToManyElement
+    ) : Annotation\OneToMany {
+        $oneToManyAnnotation = new Annotation\OneToMany();
+
+        $oneToManyAnnotation->targetEntity = (string) $oneToManyElement['target-entity'];
+
+        if (isset($oneToManyElement['mapped-by'])) {
+            $oneToManyAnnotation->mappedBy = (string) $oneToManyElement['mapped-by'];
+        }
+
+        if (isset($manyToOneElement['fetch'])) {
+            $oneToManyAnnotation->fetch = (string) $oneToManyElement['fetch'];
+        }
+
+        if (isset($oneToManyElement->cascade)) {
+            $oneToManyAnnotation->cascade = $this->getCascadeMappings($oneToManyElement->cascade);
+        }
+
+        if (isset($oneToManyElement['orphan-removal'])) {
+            $oneToManyAnnotation->orphanRemoval = $this->evaluateBoolean($oneToManyElement['orphan-removal']);
+        }
+
+        if (isset($oneToManyElement['index-by'])) {
+            $oneToManyAnnotation->indexBy = (string) $oneToManyElement['index-by'];
+        } elseif (isset($oneToManyElement->{'index-by'})) {
+            throw new InvalidArgumentException('<index-by /> is not a valid tag');
+        }
+
+        return $oneToManyAnnotation;
+    }
+
     private function convertFieldElementToColumnAnnotation(
         SimpleXMLElement $fieldElement
     ) : Annotation\Column {
@@ -946,6 +916,21 @@ class XmlDriver extends FileDriver
         return $joinTableAnnotation;
     }
 
+    private function convertJoinColumnsElementToJoinColumnsAnnotation(
+        SimpleXMLElement $joinColumnsElement
+    ) : Annotation\JoinColumns {
+        $joinColumnsAnnotation = new Annotation\JoinColumns();
+        $joinColumns           = [];
+
+        foreach ($joinColumnsElement->{'join-column'} as $joinColumnElement) {
+            $joinColumns[] = $this->convertJoinColumnElementToJoinColumnAnnotation($joinColumnElement);
+        }
+
+        $joinColumnsAnnotation->value = $joinColumns;
+
+        return $joinColumnsAnnotation;
+    }
+
     /**
      * Constructs a JoinColumn annotation based on the information
      * found in the given SimpleXMLElement.
@@ -1001,23 +986,40 @@ class XmlDriver extends FileDriver
         return $cacheAnnotation;
     }
 
-    private function convertDiscriminiatorColumnElementToDiscriminatorColumnAnnotation(
-        SimpleXMLElement $discriminatorColumnMapping
+    private function convertDiscrimininatorColumnElementToDiscriminatorColumnAnnotation(
+        SimpleXMLElement $discriminatorColumnElement
     ) : Annotation\DiscriminatorColumn {
         $discriminatorColumnAnnotation = new Annotation\DiscriminatorColumn();
 
-        $discriminatorColumnAnnotation->type = (string) ($discriminatorColumnMapping['type'] ?? 'string');
-        $discriminatorColumnAnnotation->name = (string) $discriminatorColumnMapping['name'];
+        $discriminatorColumnAnnotation->type = (string) ($discriminatorColumnElement['type'] ?? 'string');
+        $discriminatorColumnAnnotation->name = (string) $discriminatorColumnElement['name'];
 
-        if (isset($discriminatorColumnMapping['column-definition'])) {
-            $discriminatorColumnAnnotation->columnDefinition = (string) $discriminatorColumnMapping['column-definition'];
+        if (isset($discriminatorColumnElement['column-definition'])) {
+            $discriminatorColumnAnnotation->columnDefinition = (string) $discriminatorColumnElement['column-definition'];
         }
 
-        if (isset($discriminatorColumnMapping['length'])) {
-            $discriminatorColumnAnnotation->length = (int) $discriminatorColumnMapping['length'];
+        if (isset($discriminatorColumnElement['length'])) {
+            $discriminatorColumnAnnotation->length = (int) $discriminatorColumnElement['length'];
         }
 
         return $discriminatorColumnAnnotation;
+    }
+
+    private function convertOrderByElementToOrderByAnnotation(
+        SimpleXMLElement $orderByElement
+    ) : Annotation\OrderBy {
+        $orderByAnnotation = new Annotation\OrderBy();
+        $orderBy           = [];
+
+        foreach ($orderByElement->{'order-by-field'} as $orderByField) {
+            $orderBy[(string) $orderByField['name']] = isset($orderByField['direction'])
+                ? (string) $orderByField['direction']
+                : Criteria::ASC;
+        }
+
+        $orderByAnnotation->value = $orderBy;
+
+        return $orderByAnnotation;
     }
 
     /**
