@@ -54,7 +54,7 @@ class OneToManyAssociationMetadataBuilder extends ToManyAssociationMetadataBuild
             $associationMetadata->setOrphanRemoval($this->oneToManyAnnotation->orphanRemoval);
 
             // Orphan removal also implies a cascade remove
-            $associationMetadata->setCascade(array_unique(array_merge(['remove'], $associationMetadata->getCascade())));
+            $associationMetadata->setCascade(array_unique(array_merge($associationMetadata->getCascade(), ['remove'])));
         }
 
         if ($this->orderByAnnotation !== null) {

@@ -16,7 +16,6 @@ use function class_exists;
 use function constant;
 use function explode;
 use function file_get_contents;
-use function get_class;
 use function in_array;
 use function simplexml_load_string;
 use function sprintf;
@@ -313,9 +312,10 @@ class XmlDriver extends FileDriver
                 foreach ($associationMetadata->getJoinColumns() as $joinColumnMetadata) {
                     $columnName = $joinColumnMetadata->getColumnName();
 
-                    if ($metadata->checkPropertyDuplication($columnName)) {
-                        throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
-                    }
+                    // @todo guilhermeblanco Open an issue to discuss making this scenario impossible.
+                    //if ($metadata->checkPropertyDuplication($columnName)) {
+                    //    throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
+                    //}
 
                     if ($associationMetadata->isOwningSide()) {
                         $metadata->fieldNames[$columnName] = $associationMetadata->getName();
@@ -356,9 +356,10 @@ class XmlDriver extends FileDriver
                 foreach ($associationMetadata->getJoinColumns() as $joinColumnMetadata) {
                     $columnName = $joinColumnMetadata->getColumnName();
 
-                    if ($metadata->checkPropertyDuplication($columnName)) {
-                        throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
-                    }
+                    // @todo guilhermeblanco Open an issue to discuss making this scenario impossible.
+                    //if ($metadata->checkPropertyDuplication($columnName)) {
+                    //    throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
+                    //}
 
                     if ($associationMetadata->isOwningSide()) {
                         $metadata->fieldNames[$columnName] = $associationMetadata->getName();
@@ -396,93 +397,31 @@ class XmlDriver extends FileDriver
 
         // Evaluate <many-to-many ...> mappings
         if (isset($xmlRoot->{'many-to-many'})) {
+            $manyToManyAssociationBuilder = new Builder\ManyToManyAssociationMetadataBuilder($metadataBuildingContext);
+
+            $manyToManyAssociationBuilder
+                ->withComponentMetadata($metadata);
+
             foreach ($xmlRoot->{'many-to-many'} as $manyToManyElement) {
-                $association  = new Mapping\ManyToManyAssociationMetadata((string) $manyToManyElement['field']);
-                $targetEntity = (string) $manyToManyElement['target-entity'];
+                $fieldName           = (string) $manyToManyElement['field'];
+                $associationMetadata = $manyToManyAssociationBuilder
+                    ->withFieldName($fieldName)
+                    ->withCacheAnnotation($this->convertCacheElementToCacheAnnotation($manyToManyElement->cache))
+                    ->withManyToManyAnnotation($this->convertManyToManyElementToManyToManyAnnotation($manyToManyElement))
+                    ->withJoinTableAnnotation(
+                        isset($manyToManyElement->{'join-table'})
+                            ? $this->convertJoinTableElementToJoinTableAnnotation($manyToManyElement->{'join-table'})
+                            : null
+                    )
+                    ->withOrderByAnnotation(
+                        isset($manyToManyElement->{'order-by'})
+                            ? $this->convertOrderByElementToOrderByAnnotation($manyToManyElement->{'order-by'})
+                            : null
+                    )
+                    ->withIdAnnotation(isset($associationIds[$fieldName]) ? new Annotation\Id() : null)
+                    ->build();
 
-                $association->setTargetEntity($targetEntity);
-
-                if (isset($associationIds[$association->getName()])) {
-                    throw Mapping\MappingException::illegalToManyIdentifierAssociation($className, $association->getName());
-                }
-
-                if (isset($manyToManyElement['fetch'])) {
-                    $association->setFetchMode(
-                        constant(sprintf('%s::%s', Mapping\FetchMode::class, (string) $manyToManyElement['fetch']))
-                    );
-                }
-
-                if (isset($manyToManyElement->cascade)) {
-                    $association->setCascade($this->getCascadeMappings($manyToManyElement->cascade));
-                }
-
-                if (isset($manyToManyElement['orphan-removal'])) {
-                    $association->setOrphanRemoval($this->evaluateBoolean($manyToManyElement['orphan-removal']));
-                }
-
-                if (isset($manyToManyElement['mapped-by'])) {
-                    $association->setMappedBy((string) $manyToManyElement['mapped-by']);
-                    $association->setOwningSide(false);
-                }
-
-                if (isset($manyToManyElement['inversed-by'])) {
-                    $association->setInversedBy((string) $manyToManyElement['inversed-by']);
-                }
-
-                if (isset($manyToManyElement['index-by'])) {
-                    $association->setIndexedBy((string) $manyToManyElement['index-by']);
-                } elseif (isset($manyToManyElement->{'index-by'})) {
-                    throw new InvalidArgumentException('<index-by /> is not a valid tag');
-                }
-
-                if (isset($manyToManyElement->{'order-by'})) {
-                    $orderBy = [];
-
-                    foreach ($manyToManyElement->{'order-by'}->{'order-by-field'} as $orderByField) {
-                        $orderBy[(string) $orderByField['name']] = isset($orderByField['direction'])
-                            ? (string) $orderByField['direction']
-                            : Criteria::ASC;
-                    }
-
-                    $association->setOrderBy($orderBy);
-                }
-
-                // Check for cache
-                if (isset($manyToManyElement->cache)) {
-                    $cacheBuilder = new Builder\CacheMetadataBuilder($metadataBuildingContext);
-
-                    $cacheBuilder
-                        ->withComponentMetadata($metadata)
-                        ->withFieldName($association->getName())
-                        ->withCacheAnnotation($this->convertCacheElementToCacheAnnotation($manyToManyElement->cache));
-
-                    $association->setCache($cacheBuilder->build());
-                }
-
-                // Check for owning side to consider join column
-                if (! $association->isOwningSide()) {
-                    $metadata->addProperty($association);
-
-                    continue;
-                }
-
-                $joinTableBuilder = new Builder\JoinTableMetadataBuilder($metadataBuildingContext);
-
-                $joinTableBuilder
-                    ->withComponentMetadata($metadata)
-                    ->withFieldName($association->getName())
-                    ->withTargetEntity($targetEntity);
-
-                if (isset($manyToManyElement->{'join-table'})) {
-                    $joinTableElement    = $manyToManyElement->{'join-table'};
-                    $joinTableAnnotation = $this->convertJoinTableElementToJoinTableAnnotation($joinTableElement);
-
-                    $joinTableBuilder->withJoinTableAnnotation($joinTableAnnotation);
-                }
-
-                $association->setJoinTable($joinTableBuilder->build());
-
-                $metadata->addProperty($association);
+                $metadata->addProperty($associationMetadata);
             }
         }
 
@@ -495,6 +434,11 @@ class XmlDriver extends FileDriver
 
             foreach ($xmlRoot->{'attribute-overrides'}->{'attribute-override'} as $overrideElement) {
                 $fieldName = (string) $overrideElement['name'];
+                $property  = $metadata->getProperty($fieldName);
+
+                if (! $property) {
+                    throw Mapping\MappingException::invalidOverrideFieldName($metadata->getClassName(), $fieldName);
+                }
 
                 foreach ($overrideElement->field as $fieldElement) {
                     $versionAnnotation = isset($fieldElement['version']) && $this->evaluateBoolean($fieldElement['version'])
@@ -508,14 +452,14 @@ class XmlDriver extends FileDriver
                         ->withVersionAnnotation($versionAnnotation);
 
                     $fieldMetadata = $fieldBuilder->build();
+                    $columnName    = $fieldMetadata->getColumnName();
 
                     // Prevent column duplication
-                    if ($metadata->checkPropertyDuplication($fieldMetadata->getColumnName())) {
-                        throw Mapping\MappingException::duplicateColumnName(
-                            $metadata->getClassName(),
-                            $fieldMetadata->getColumnName()
-                        );
+                    if ($metadata->checkPropertyDuplication($columnName)) {
+                        throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
                     }
+
+                    $metadata->fieldNames[$fieldMetadata->getColumnName()] = $fieldName;
 
                     $metadata->setPropertyOverride($fieldMetadata);
                 }
@@ -532,10 +476,7 @@ class XmlDriver extends FileDriver
                     throw Mapping\MappingException::invalidOverrideFieldName($metadata->getClassName(), $fieldName);
                 }
 
-                $existingClass = get_class($property);
-                $override      = new $existingClass($fieldName);
-
-                $override->setTargetEntity($property->getTargetEntity());
+                $override = clone $property;
 
                 // Check for join-columns
                 if (isset($overrideElement->{'join-columns'})) {
@@ -545,13 +486,29 @@ class XmlDriver extends FileDriver
                         ->withComponentMetadata($metadata)
                         ->withFieldName($override->getName());
 
+                    $joinColumns = [];
+
                     foreach ($overrideElement->{'join-columns'}->{'join-column'} as $joinColumnElement) {
-                        $joinColumnAnnotation = $this->convertJoinColumnElementToJoinColumnAnnotation($joinColumnElement);
+                        $joinColumnBuilder->withJoinColumnAnnotation(
+                            $this->convertJoinColumnElementToJoinColumnAnnotation($joinColumnElement)
+                        );
 
-                        $joinColumnBuilder->withJoinColumnAnnotation($joinColumnAnnotation);
+                        $joinColumnMetadata = $joinColumnBuilder->build();
+                        $columnName         = $joinColumnMetadata->getColumnName();
 
-                        $override->addJoinColumn($joinColumnBuilder->build());
+                        // @todo guilhermeblanco Open an issue to discuss making this scenario impossible.
+                        //if ($metadata->checkPropertyDuplication($columnName)) {
+                        //    throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
+                        //}
+
+                        if ($override->isOwningSide()) {
+                            $metadata->fieldNames[$columnName] = $fieldName;
+                        }
+
+                        $joinColumns[] = $joinColumnMetadata;
                     }
+
+                    $override->setJoinColumns($joinColumns);
                 }
 
                 // Check for join-table
@@ -798,6 +755,42 @@ class XmlDriver extends FileDriver
         }
 
         return $oneToManyAnnotation;
+    }
+
+    private function convertManyToManyElementToManyToManyAnnotation(
+        SimpleXMLElement $manyToManyElement
+    ) : Annotation\ManyToMany {
+        $manyToManyAnnotation = new Annotation\ManyToMany();
+
+        $manyToManyAnnotation->targetEntity = (string) $manyToManyElement['target-entity'];
+
+        if (isset($manyToManyElement['mapped-by'])) {
+            $manyToManyAnnotation->mappedBy = (string) $manyToManyElement['mapped-by'];
+        }
+
+        if (isset($manyToManyElement['inversed-by'])) {
+            $manyToManyAnnotation->inversedBy = (string) $manyToManyElement['inversed-by'];
+        }
+
+        if (isset($manyToManyElement['fetch'])) {
+            $manyToManyAnnotation->fetch = (string) $manyToManyElement['fetch'];
+        }
+
+        if (isset($manyToManyElement->cascade)) {
+            $manyToManyAnnotation->cascade = $this->getCascadeMappings($manyToManyElement->cascade);
+        }
+
+        if (isset($manyToManyElement['orphan-removal'])) {
+            $manyToManyAnnotation->orphanRemoval = $this->evaluateBoolean($manyToManyElement['orphan-removal']);
+        }
+
+        if (isset($manyToManyElement['index-by'])) {
+            $manyToManyAnnotation->indexBy = (string) $manyToManyElement['index-by'];
+        } elseif (isset($manyToManyElement->{'index-by'})) {
+            throw new InvalidArgumentException('<index-by /> is not a valid tag');
+        }
+
+        return $manyToManyAnnotation;
     }
 
     private function convertFieldElementToColumnAnnotation(

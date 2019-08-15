@@ -565,9 +565,10 @@ class AnnotationDriver implements MappingDriver
                 foreach ($associationMetadata->getJoinColumns() as $joinColumnMetadata) {
                     $columnName = $joinColumnMetadata->getColumnName();
 
-                    if ($metadata->checkPropertyDuplication($columnName)) {
-                        throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
-                    }
+                    // @todo guilhermeblanco Open an issue to discuss making this scenario impossible.
+                    //if ($metadata->checkPropertyDuplication($columnName)) {
+                    //    throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
+                    //}
 
                     if ($associationMetadata->isOwningSide()) {
                         $metadata->fieldNames[$columnName] = $associationMetadata->getName();
@@ -592,9 +593,10 @@ class AnnotationDriver implements MappingDriver
                 foreach ($associationMetadata->getJoinColumns() as $joinColumnMetadata) {
                     $columnName = $joinColumnMetadata->getColumnName();
 
-                    if ($metadata->checkPropertyDuplication($columnName)) {
-                        throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
-                    }
+                    // @todo guilhermeblanco Open an issue to discuss making this scenario impossible.
+                    //if ($metadata->checkPropertyDuplication($columnName)) {
+                    //    throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
+                    //}
 
                     if ($associationMetadata->isOwningSide()) {
                         $metadata->fieldNames[$columnName] = $associationMetadata->getName();
@@ -742,21 +744,18 @@ class AnnotationDriver implements MappingDriver
         if (isset($classAnnotations[Annotation\AssociationOverrides::class])) {
             $associationOverridesAnnot = $classAnnotations[Annotation\AssociationOverrides::class];
 
-            foreach ($associationOverridesAnnot->value as $associationOverride) {
-                $fieldName = $associationOverride->name;
+            foreach ($associationOverridesAnnot->value as $associationOverrideAnnotation) {
+                $fieldName = $associationOverrideAnnotation->name;
                 $property  = $metadata->getProperty($fieldName);
 
                 if (! $property) {
                     throw Mapping\MappingException::invalidOverrideFieldName($metadata->getClassName(), $fieldName);
                 }
 
-                $existingClass = get_class($property);
-                $override      = new $existingClass($fieldName);
-
-                $override->setTargetEntity($property->getTargetEntity());
+                $override = clone $property;
 
                 // Check for JoinColumn/JoinColumns annotations
-                if ($associationOverride->joinColumns) {
+                if ($associationOverrideAnnotation->joinColumns) {
                     $joinColumnBuilder = new Builder\JoinColumnMetadataBuilder($metadataBuildingContext);
 
                     $joinColumnBuilder
@@ -765,36 +764,48 @@ class AnnotationDriver implements MappingDriver
 
                     $joinColumns = [];
 
-                    foreach ($associationOverride->joinColumns as $joinColumnAnnotation) {
+                    foreach ($associationOverrideAnnotation->joinColumns as $joinColumnAnnotation) {
                         $joinColumnBuilder->withJoinColumnAnnotation($joinColumnAnnotation);
 
-                        $override->addJoinColumn($joinColumnBuilder->build());
+                        $joinColumnMetadata = $joinColumnBuilder->build();
+                        $columnName         = $joinColumnMetadata->getColumnName();
+
+                        // @todo guilhermeblanco Open an issue to discuss making this scenario impossible.
+                        //if ($metadata->checkPropertyDuplication($columnName)) {
+                        //    throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
+                        //}
+
+                        if ($override->isOwningSide()) {
+                            $metadata->fieldNames[$columnName] = $fieldName;
+                        }
+
+                        $joinColumns[] = $joinColumnMetadata;
                     }
+
+                    $override->setJoinColumns($joinColumns);
                 }
 
                 // Check for JoinTable annotations
-                if ($associationOverride->joinTable) {
+                if ($associationOverrideAnnotation->joinTable) {
                     $joinTableBuilder = new Builder\JoinTableMetadataBuilder($metadataBuildingContext);
 
                     $joinTableBuilder
                         ->withComponentMetadata($metadata)
                         ->withFieldName($fieldName)
                         ->withTargetEntity($property->getTargetEntity())
-                        ->withJoinTableAnnotation($associationOverride->joinTable);
+                        ->withJoinTableAnnotation($associationOverrideAnnotation->joinTable);
 
                     $override->setJoinTable($joinTableBuilder->build());
                 }
 
                 // Check for inversedBy
-                if ($associationOverride->inversedBy) {
-                    $override->setInversedBy($associationOverride->inversedBy);
+                if ($associationOverrideAnnotation->inversedBy) {
+                    $override->setInversedBy($associationOverrideAnnotation->inversedBy);
                 }
 
                 // Check for fetch
-                if ($associationOverride->fetch) {
-                    $override->setFetchMode(
-                        constant(Mapping\FetchMode::class . '::' . $associationOverride->fetch)
-                    );
+                if ($associationOverrideAnnotation->fetch) {
+                    $override->setFetchMode(constant(Mapping\FetchMode::class . '::' . $associationOverrideAnnotation->fetch));
                 }
 
                 $metadata->setPropertyOverride($override);
@@ -812,11 +823,28 @@ class AnnotationDriver implements MappingDriver
                 ->withVersionAnnotation(null);
 
             foreach ($attributeOverridesAnnot->value as $attributeOverrideAnnotation) {
+                $fieldName = $attributeOverrideAnnotation->name;
+                $property  = $metadata->getProperty($fieldName);
+
+                if (! $property) {
+                    throw Mapping\MappingException::invalidOverrideFieldName($metadata->getClassName(), $fieldName);
+                }
+
                 $fieldBuilder
-                    ->withFieldName($attributeOverrideAnnotation->name)
+                    ->withFieldName($fieldName)
                     ->withColumnAnnotation($attributeOverrideAnnotation->column);
 
-                $metadata->setPropertyOverride($fieldBuilder->build());
+                $fieldMetadata = $fieldBuilder->build();
+                $columnName    = $fieldMetadata->getColumnName();
+
+                // Prevent column duplication
+                if ($metadata->checkPropertyDuplication($columnName)) {
+                    throw Mapping\MappingException::duplicateColumnName($metadata->getClassName(), $columnName);
+                }
+
+                $metadata->fieldNames[$fieldMetadata->getColumnName()] = $fieldName;
+
+                $metadata->setPropertyOverride($fieldMetadata);
             }
         }
     }

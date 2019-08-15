@@ -31,7 +31,7 @@ class City
      * @ORM\ManyToOne(targetEntity=Admin1::class)
      * @ORM\JoinColumns({
      *   @ORM\JoinColumn(name="admin1", referencedColumnName="id"),
-     *   @ORM\JoinColumn(name="country", referencedColumnName="country")
+     *   @ORM\JoinColumn(name="country_id", referencedColumnName="country")
      * })
      * @ORM\Cache
      */
